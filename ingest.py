@@ -1,31 +1,53 @@
 import json
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any, Union
+from typing import Dict
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
+import streamlit as st
+import os
 
 class Document(BaseModel):
-    page_content:str
-    metadata:Dict
+    page_content: str
+    metadata: Dict
 
-def load_documents(path="data.json"):
-    with open(path, "r") as f:
-        data = json.load(f)
+@st.cache_resource
+def load_embeddings_model():
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
+@st.cache_resource
+def load_documents():
+    return json.load(open("data.json", "r"))
 
-    docs=[]
-    for index,doc in enumerate(data):
-        docs.append(Document(page_content=str(doc),metadata={'source': '/content/data.json', 'seq_num': index+1}))
+@st.cache_resource
+def load_embeddings():
+    embeddings_model = load_embeddings_model()
+    data = load_documents()
+    docs = [
+        Document(page_content=str(doc), metadata={'source': '/content/data.json', 'seq_num': index+1})
+        for index, doc in enumerate(data)
+    ]
+    return embeddings_model, docs
 
-    return docs
+def create_embeddings():
+    persist_directory = './doctors_db'
+    
+    # Check if the vector store already exists on disk
+    if os.path.exists(os.path.join(persist_directory, "./doctors_db")):
+        print('It shold run...........')
+        st.session_state.db = Chroma.load(persist_directory)
+    else:
+        embeddings_model, docs = load_embeddings()
+        print('It shold not run........')
+        st.session_state.db = Chroma.from_documents(
+            documents=docs,
+            embedding=embeddings_model,
+            persist_directory=persist_directory
+        )
+    
+    return st.session_state.db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
+# def main():
+#     create_embeddings()
 
-def create_embedings(persist_directory="",docs=load_documents()):
-    # save to disk
-    db = Chroma.from_documents(docs, embeddings, persist_directory="docters_db")
-    return  db.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-
-
+# if __name__ == "__main__":
+#     main()

@@ -1,7 +1,10 @@
-
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import JSONLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq
@@ -13,26 +16,20 @@ from pathlib import Path
 from pprint import pprint, PrettyPrinter
 from typing import Dict
 from pydantic import BaseModel
-from ingest import create_embedings
+from ingest import create_embeddings
 import streamlit as st
 
 
-
 llm = ChatGroq(temperature=0.5,
-                model_name="Llama3-70b-8192",
-                api_key='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',
-                max_tokens=100,
-                model_kwargs={
-                    "top_p": 1,
-                    "frequency_penalty": 0.0,
-                    "presence_penalty": 0.0
-                }
-                )
-
-
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.chains.combine_documents import create_stuff_documents_chain
+               model_name="Llama3-70b-8192",
+               api_key='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',
+               max_tokens=100,
+               model_kwargs={
+                   "top_p": 1,
+                   "frequency_penalty": 0.0,
+                   "presence_penalty": 0.0
+               }
+               )
 
 contextualize_q_system_prompt = """Given a chat history and the latest user question \
 which might reference context in the chat history, formulate a standalone question \
@@ -46,11 +43,19 @@ contextualize_q_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-retriever=create_embedings()
-history_aware_retriever = create_history_aware_retriever(
-    llm, retriever, contextualize_q_prompt
-)
+# Check if retriever is already created
+if "retriever" not in st.session_state:
+    st.session_state.retriever = create_embeddings()
 
+# Check if history aware retriever is already created
+# if "history_aware_retriever" not in st.session_state:
+#     st.session_state.history_aware_retriever = create_history_aware_retriever(
+#         llm, st.session_state.retriever, contextualize_q_prompt
+#     )
+
+history_aware_retriever = create_history_aware_retriever(
+    llm, st.session_state.retriever, contextualize_q_prompt
+)
 
 
 qa_system_prompt = """
@@ -97,6 +102,7 @@ Once you have gathered all the necessary information from the patient, recommend
 Context: 
 {context}
 """
+
 qa_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", qa_system_prompt),
@@ -105,15 +111,14 @@ qa_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-
 question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
 
-rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-from langchain_core.messages import HumanMessage, AIMessage
+rag_chain = create_retrieval_chain(
+    history_aware_retriever, question_answer_chain)
+
 
 def serialize_history(history):
-    serial_history=[]
-
+    serial_history = []
     for message in history:
         if message["role"] == "user":
             serial_history.append(HumanMessage(content=message["content"]))
@@ -122,48 +127,38 @@ def serialize_history(history):
     return serial_history
 
 
-
-def generate_response(question,history):
+def generate_response(question, history):
     history = serialize_history(history)
     ai_msg_1 = rag_chain.invoke({"input": question, "chat_history": history})
     return ai_msg_1['answer']
-    
-    
-    
-    
-    
-    
 
 
 def chat():
-  """Manages a chat conversation between user and assistant."""
+    """Manages a chat conversation between user and assistant."""
 
-  if "messages" not in st.session_state.keys():
-    st.session_state.messages = [
-      {"role": "assistant", "content": "👋 Welcome to HealthConnect AI!🤖 Your personal healthcare assistant.👨‍⚕️ Get personalized doctor recommendations."}
-    ]
+    if "messages" not in st.session_state.keys():
+        st.session_state.messages = [
+            {"role": "assistant", "content": "👋 Welcome to HealthConnect AI!🤖 Your personal healthcare assistant.👨‍⚕️ Get personalized doctor recommendations."}
+        ]
 
-  if prompt := st.chat_input("Say something..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    if prompt := st.chat_input("Say something..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
-  for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-      st.write(message["content"])
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
 
-  if st.session_state.messages[-1]["role"] != "assistant":
-    with st.chat_message("assistant"):
-      with st.spinner("Thinking..."):
-        response = generate_response(st.session_state.messages[-1]["content"],st.session_state.messages)  # Replace with your response generation logic
-        print(st.session_state.messages)
-        st.write(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
-
-if __name__=='__main__':
-   
-  chat()
-
+    if st.session_state.messages[-1]["role"] != "assistant":
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                # Replace with your response generation logic
+                response = generate_response(
+                    st.session_state.messages[-1]["content"], st.session_state.messages)
+                print(st.session_state.messages)
+                st.write(response)
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": response})
 
 
-
-
-
+if __name__ == '__main__':
+    chat()
